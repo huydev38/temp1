@@ -1,0 +1,54 @@
+global
+  daemon
+  log  127.0.0.1 local0 info
+  tune.ssl.default-dh-param 2048
+  maxconn  20000
+  pidfile  /app/haproxy/run/haproxy.pid
+  stats  socket /app/haproxy/lib/haproxy/stats
+  tune.bufsize  131072
+  user mwop
+  group mwop
+  tune.ssl.default-dh-param 2048
+
+defaults
+  log  global
+  maxconn  10000
+  mode  http
+  option  dontlog-normal
+  option  http-server-close
+  retries  3
+  stats  enable
+  timeout  http-request 10s
+  timeout  queue 1m
+  timeout  connect 10s
+  timeout  client 1m
+  timeout  server 30m
+  timeout  check 10s
+
+listen Stats
+  bind 0.0.0.0:10000
+  mode http
+  stats enable
+  stats uri /
+  stats refresh 5s
+  stats show-node
+  stats show-legends
+  stats hide-version
+
+frontend https_frontend
+  bind *:80
+  bind *:443 ssl crt  /app/haproxy/cert/sit.xxx.com.pem
+  acl secure dst_port eq 443
+  http-request add-header X-Forwarded-Proto https if { ssl_fc }
+  redirect scheme https if !{ ssl_fc }
+  rspadd Strict-Transport-Security:\ max-age=31536000;\ includeSubDomains;\ preload
+  rsprep ^Set-Cookie:\ (.*) Set-Cookie:\ \1;\ Secure if secure
+  option httpclose
+  default_backend web_server
+
+backend web_server
+  mode http
+  balance roundrobin
+  http-request add-header X-Forwarded-Proto https if { ssl_fc }
+  cookie SERVERID insert indirect nocache
+  server s1 100.xxx.xxx.133:80 check cookie s1
