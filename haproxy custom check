@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Địa chỉ của Harbor API
+HARBOR_API="http://localhost/api/v2.0/health"
+
+# Lấy kết quả health check
+HEALTH_STATUS=$(curl -s $HARBOR_API)
+
+# Kiểm tra nếu tất cả các component đều "healthy"
+if echo $HEALTH_STATUS | grep -q '"status": "healthy"'; then
+    # Kiểm tra từng component
+    if echo $HEALTH_STATUS | grep -q '"name": "core", "status": "healthy"' && \
+       echo $HEALTH_STATUS | grep -q '"name": "database", "status": "healthy"' && \
+       echo $HEALTH_STATUS | grep -q '"name": "jobservice", "status": "healthy"' && \
+       echo $HEALTH_STATUS | grep -q '"name": "portal", "status": "healthy"' && \
+       echo $HEALTH_STATUS | grep -q '"name": "redis", "status": "healthy"' && \
+       echo $HEALTH_STATUS | grep -q '"name": "registry", "status": "healthy"' && \
+       echo $HEALTH_STATUS | grep -q '"name": "registryctl", "status": "healthy"'; then
+        echo "healthy"
+        exit 0  # Nếu tất cả các component healthy, trả về mã 0 (tốt)
+    else
+        echo "unhealthy"
+        exit 1  # Nếu có component nào không healthy, trả về mã 1
+    fi
+else
+    echo "unhealthy"
+    exit 1  # Nếu trạng thái chung không healthy, trả về mã 1
+fi
+
+
+
+
+  external-check command ping.sh
+    server s1_a 1.2.3.4:3600 check inter 5s fall 1 rise 1
+    server s2_b 1.2.3.5:3600 check backup
+
+    timeout queue 60s
+    timeout server 60s
+    timeout connect 60s
