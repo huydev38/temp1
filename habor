@@ -1,7 +1,0 @@
-Cấu hình harbor, dùng script health check custom health check harbor, curl localhost/api/v2.0/health
-
-{"components":[{"name":"core", "status": "healthy"},{"name": "database" ,"status":"healthy"},{"name":"jobservice", "status": "healthy"}, ":"portal","status":"healthy"},{"name":"redis", "status": "healthy"},{ "name":"registry","status": "healthy"},{"name": "registryctl","status" :"healthy"}],"status": "healthy"}
-
-Nếu tất cả healthy thì đưa về server hiện tại
-Nếu không đưa tới server backup
-
