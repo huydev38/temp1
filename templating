@@ -1,0 +1,39 @@
+{
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" },
+        "hide": 2
+      },
+      {
+        "type": "query",
+        "name": "namespace",
+        "label": "Namespace",
+        "datasource": "${datasource}",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "query": "label_values(istio_requests_total{reporter=\"destination\"}, destination_service_namespace)",
+        "definition": "label_values(istio_requests_total{reporter=\"destination\"}, destination_service_namespace)",
+        "sort": 1
+      },
+      {
+        "type": "query",
+        "name": "service",
+        "label": "Service",
+        "datasource": "${datasource}",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "query": "label_values(istio_requests_total{reporter=\"destination\", destination_service_namespace=~\"$namespace\"}, destination_service_name)",
+        "definition": "label_values(istio_requests_total{reporter=\"destination\", destination_service_namespace=~\"$namespace\"}, destination_service_name)",
+        "sort": 1
+      }
+    ]
+  }
+}
