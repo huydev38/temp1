@@ -1,0 +1,149 @@
+{
+  "id": null,
+  "uid": "istio-availability",
+  "title": "Service Availability (Istio)",
+  "timezone": "",
+  "schemaVersion": 38,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "tags": ["istio", "sre", "availability"],
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" },
+        "hide": 2
+      },
+      {
+        "type": "query",
+        "name": "namespace",
+        "label": "Namespace",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "query": "label_values(istio_requests_total, destination_workload_namespace)",
+        "sort": 1,
+        "definition": "label_values(istio_requests_total, destination_workload_namespace)"
+      },
+      {
+        "type": "query",
+        "name": "service",
+        "label": "Service",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "query": "label_values(istio_requests_total{destination_workload_namespace=~\"$namespace\"}, destination_service)",
+        "definition": "label_values(istio_requests_total{destination_workload_namespace=~\"$namespace\"}, destination_service)",
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Availability (%)",
+      "id": 1,
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99 },
+              { "color": "green", "value": 99.9 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - (\n  sum(rate(istio_requests_total{destination_workload_namespace=~\"$namespace\", destination_service=~\"$service\", response_code=~\"5..\"}[5m]))\n  /\n  sum(rate(istio_requests_total{destination_workload_namespace=~\"$namespace\", destination_service=~\"$service\"}[5m]))\n))",
+          "legendFormat": "Availability",
+          "intervalFactor": 1,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Current Availability",
+      "id": 2,
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 99 },
+              { "color": "green", "value": 99.9 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - (\n  sum(rate(istio_requests_total{destination_workload_namespace=~\"$namespace\", destination_service=~\"$service\", response_code=~\"5..\"}[5m]))\n  /\n  sum(rate(istio_requests_total{destination_workload_namespace=~\"$namespace\", destination_service=~\"$service\"}[5m]))\n))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Request Rate (rps)",
+      "id": 3,
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "req/s", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(istio_requests_total{destination_workload_namespace=~\"$namespace\", destination_service=~\"$service\"}[5m]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "5xx Rate (rps)",
+      "id": 4,
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "req/s", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(istio_requests_total{destination_workload_namespace=~\"$namespace\", destination_service=~\"$service\", response_code=~\"5..\"}[5m]))"
+        }
+      ]
+    }
+  ]
+}
