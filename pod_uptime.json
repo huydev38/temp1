@@ -1,0 +1,131 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "table",
+      "title": "Pod Status by Namespace",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "uid": "$datasource", "type": "prometheus" },
+          "expr": "kube_pod_status_phase{namespace=~\"$namespace\"} == 1",
+          "legendFormat": "{{namespace}} / {{pod}} — {{phase}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "decimals": 0 },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": false }
+      },
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": {
+          "excludeByName": { "Time": true, "Value": true },
+          "indexByName": {
+            "namespace": 0,
+            "pod": 1,
+            "phase": 2
+          },
+          "renameByName": {
+            "namespace": "Namespace",
+            "pod": "Pod",
+            "phase": "Phase"
+          }
+        } }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Pod Uptime (seconds)",
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "uid": "$datasource", "type": "prometheus" },
+          "expr": "max by (namespace, pod) ( time() - kube_pod_start_time{namespace=~\"$namespace\"} )",
+          "legendFormat": "{{namespace}} / {{pod}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 0 },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": false }
+      },
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": {
+          "excludeByName": { "Time": true },
+          "indexByName": {
+            "namespace": 0,
+            "pod": 1,
+            "Value": 2
+          },
+          "renameByName": {
+            "namespace": "Namespace",
+            "pod": "Pod",
+            "Value": "Uptime (s)"
+          }
+        } }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["kubernetes", "pods", "status", "uptime"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Prometheus",
+        "hide": 0,
+        "current": { "selected": true }
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": { "uid": "$datasource", "type": "prometheus" },
+        "label": "Namespace",
+        "query": "label_values(kube_namespace_labels, namespace)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "current": {}
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["10s", "30s", "1m", "5m", "15m", "30m", "1h"]
+  },
+  "timezone": "",
+  "title": "Kubernetes — Pod Status & Uptime",
+  "uid": "k8s-pod-status-uptime",
+  "version": 1,
+  "weekStart": ""
+}
