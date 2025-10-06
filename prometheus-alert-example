@@ -1,0 +1,434 @@
+Tuyệt — dưới đây là “bộ chuẩn” theo đúng yêu cầu của bạn: theo dõi **K8s (toàn cụm + từng node) CPU/RAM/Disk**, sau đó **theo app qua Istio** (latency, error rate, availability), và **CPU/RAM theo pod**. Mình đưa luôn: **(1) metrics cần quan tâm**, **(2) PromQL mẫu**, **(3) ngưỡng alert (Info/Warn/Critical)**. Bạn có thể copy–paste trực tiếp vào Prometheus/Grafana; cuối cùng là block YAML rule mẫu.
+
+---
+
+# 1) Kubernetes cluster & node (CPU, RAM, Disk)
+
+## 1.1 Toàn cụm (Cluster)
+
+**CPU utilization (% cụm)**
+
+* Metrics: `node_cpu_seconds_total`
+* PromQL:
+
+```promql
+100 * (
+  sum(rate(node_cpu_seconds_total{mode!="idle"}[5m])) 
+/ sum(rate(node_cpu_seconds_total[5m]))
+)
+```
+
+* Alert:
+
+  * Info: `> 70%` trong 15m
+  * Warn: `> 85%` trong 10m
+  * Critical: `> 95%` trong 5m
+
+**Memory utilization (% cụm)**
+
+* Metrics: `node_memory_MemAvailable_bytes`, `node_memory_MemTotal_bytes`
+* PromQL:
+
+```promql
+100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))
+```
+
+* Alert:
+
+  * Info: `> 70%` (15m)
+  * Warn: `> 85%` (10m)
+  * Critical: `> 95%` (5m)
+
+**Disk free (% cụm)**
+
+* Metrics: `node_filesystem_avail_bytes`, `node_filesystem_size_bytes` (`fstype!=""`, `mountpoint!~"/(run|var/lib/kubelet)"`
+* PromQL:
+
+```promql
+100 * sum(node_filesystem_avail_bytes{fstype!=""}) 
+  / sum(node_filesystem_size_bytes{fstype!=""})
+```
+
+* Alert (ngược chiều: free thấp là xấu):
+
+  * Info: `< 25%` (60m)
+  * Warn: `< 15%` (30m)
+  * Critical: `< 5%` (15m)
+
+---
+
+## 1.2 Theo node (host)
+
+**CPU utilization (% per node)**
+
+* Metrics: `node_cpu_seconds_total`
+* PromQL:
+
+```promql
+100 * (
+  1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+)
+```
+
+* Alert:
+
+  * Warn: `> 90%` (10m)
+  * Critical: `> 95%` (5m)
+
+**Memory available (% per node)**
+
+* Metrics: `node_memory_MemAvailable_bytes`, `node_memory_MemTotal_bytes`
+* PromQL:
+
+```promql
+100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes
+```
+
+* Alert (free % thấp):
+
+  * Warn: `< 10%` (15m)
+  * Critical: `< 5%` (5m)
+
+**Disk free (% per node / per mount)**
+
+* Metrics: `node_filesystem_avail_bytes`, `node_filesystem_size_bytes`
+* PromQL:
+
+```promql
+100 * node_filesystem_avail_bytes{fstype!=""} 
+  / node_filesystem_size_bytes{fstype!=""}
+```
+
+* Alert:
+
+  * Warn: `< 15%` (30m)
+  * Critical: `< 5%` (15m)
+
+**Disk I/O saturation (tùy chọn)**
+
+* Metrics: `node_disk_io_time_seconds_total`
+* PromQL:
+
+```promql
+rate(node_disk_io_time_seconds_total[5m]) > 0.7
+```
+
+* Alert:
+
+  * Warn: `> 0.7` (15m)
+  * Critical: `> 0.9` (10m)
+
+---
+
+# 2) Theo ứng dụng qua Istio (latency, error rate, availability)
+
+> **Giả định** bạn dùng Telemetry v2 (metrics mặc định của Istio):
+>
+> * **Lưu lượng**: `istio_requests_total{reporter="destination"}`
+> * **Latency**: `istio_request_duration_milliseconds_bucket` (histogram)
+> * **Góc nhìn**: thường “destination” (workload đích), có nhãn `destination_workload`, `destination_service`, `response_code`, `grpc_response_status`, `reporter`.
+
+## 2.1 Latency (p50/p90/p95/p99)
+
+* Metrics: `istio_request_duration_milliseconds_bucket`
+* PromQL (ví dụ p99 theo workload đích):
+
+```promql
+histogram_quantile(
+  0.99, 
+  sum by (le, destination_workload, destination_workload_namespace) (
+    rate(istio_request_duration_milliseconds_bucket{reporter="destination"}[5m])
+  )
+)
+```
+
+(Đơn vị: ms)
+
+* Alert (dịch vụ web điển hình):
+
+  * Info: p99 `> 800 ms` (10m)
+  * Warn: p99 `> 1200 ms` (10m)
+  * Critical: p99 `> 2000 ms` (10m)
+
+## 2.2 Error rate (% lỗi 5xx hoặc gRPC không OK)
+
+* Metrics: `istio_requests_total`
+* PromQL (HTTP 5xx):
+
+```promql
+sum by (destination_workload, destination_workload_namespace) (
+  rate(istio_requests_total{reporter="destination", response_code=~"5.."}[5m])
+)
+/
+sum by (destination_workload, destination_workload_namespace) (
+  rate(istio_requests_total{reporter="destination"}[5m])
+)
+```
+
+* (gRPC) lỗi:
+
+```promql
+sum by (destination_workload, destination_workload_namespace) (
+  rate(istio_requests_total{reporter="destination", grpc_response_status!="OK"}[5m])
+)
+/ ignoring(grpc_response_status)
+sum by (destination_workload, destination_workload_namespace) (
+  rate(istio_requests_total{reporter="destination"}[5m])
+)
+```
+
+* Alert:
+
+  * Info: `> 1%` (5m)
+  * Warn: `> 3%` (5m)
+  * Critical: `> 5%` (5m)
+
+## 2.3 Availability (% thành công)
+
+* Định nghĩa phổ biến: **2xx + 3xx** là thành công (tuỳ bạn).
+* PromQL:
+
+```promql
+100 * (
+  sum by (destination_workload, destination_workload_namespace) (
+    rate(istio_requests_total{reporter="destination", response_code=~"2..|3.."}[5m])
+  )
+/
+  sum by (destination_workload, destination_workload_namespace) (
+    rate(istio_requests_total{reporter="destination"}[5m])
+  )
+)
+```
+
+* Alert:
+
+  * Info: `< 99.5%` (30m)
+  * Warn: `< 99.0%` (15m)
+  * Critical: `< 98.0%` (10m)
+
+> Gợi ý: thêm nhãn `destination_service=~"svcA|svcB"` khi muốn lọc theo service; hoặc group theo `virtual_service`, `response_flags` để chẩn đoán.
+
+---
+
+# 3) Theo pod (CPU/RAM từng pod, từng namespace)
+
+> Dựa trên cAdvisor/kubelet + kube-state-metrics. Loại bỏ container “POD” và empty image.
+
+**CPU per pod (cores)**
+
+* Metrics: `container_cpu_usage_seconds_total`
+* PromQL:
+
+```promql
+sum by (namespace, pod) (
+  rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+)
+```
+
+* Alert (tương đối so với request/limit nếu có):
+
+**CPU utilization vs. limit (% pod)**
+
+* Metrics: `kube_pod_container_resource_limits`, `container_cpu_usage_seconds_total`
+* PromQL:
+
+```promql
+100 *
+sum by (namespace, pod) (
+  rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+)
+/
+sum by (namespace, pod) (
+  kube_pod_container_resource_limits{resource="cpu", unit="core"}
+)
+```
+
+* Alert:
+
+  * Info: `> 80%` (10m)
+  * Warn: `> 90%` (10m)
+  * Critical: `> 95%` (5m)
+
+**Memory working set per pod (bytes)**
+
+* Metrics: `container_memory_working_set_bytes`
+* PromQL:
+
+```promql
+sum by (namespace, pod) (
+  container_memory_working_set_bytes{container!="", image!=""}
+)
+```
+
+**Memory utilization vs. limit (% pod)**
+
+* Metrics: `kube_pod_container_resource_limits`, `container_memory_working_set_bytes`
+* PromQL:
+
+```promql
+100 *
+sum by (namespace, pod) (container_memory_working_set_bytes{container!="", image!=""})
+/
+sum by (namespace, pod) (kube_pod_container_resource_limits{resource="memory", unit="byte"})
+```
+
+* Alert:
+
+  * Info: `> 80%` (15m)
+  * Warn: `> 90%` (10m)
+  * Critical: `> 95%` (5m)
+
+**Pod OOM / Restart bất thường**
+
+* Metrics: `kube_pod_container_status_restarts_total`
+* PromQL:
+
+```promql
+rate(kube_pod_container_status_restarts_total[5m]) > 0
+```
+
+* Alert:
+
+  * Warn: `> 0` (liên tục 10m)
+  * Critical: `> 0` (liên tục 30m và kèm CPU/Mem cao)
+
+**Node → Pod memory pressure (đề phòng OOM host)**
+
+* Metrics: `kube_node_status_condition{condition="MemoryPressure"}`
+* PromQL:
+
+```promql
+max by (node) (kube_node_status_condition{condition="MemoryPressure", status="true"}) == 1
+```
+
+* Alert:
+
+  * Critical: điều kiện đúng trong 5m
+
+---
+
+# 4) Alert rules YAML (mẫu nhúng nhanh)
+
+```yaml
+groups:
+
+- name: k8s-cluster
+  rules:
+  - alert: ClusterCPUHigh
+    expr: 100 * (sum(rate(node_cpu_seconds_total{mode!="idle"}[5m])) / sum(rate(node_cpu_seconds_total[5m]))) > 95
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Cluster CPU >95% (5m)"
+  - alert: ClusterMemHigh
+    expr: 100 * (1 - sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes)) > 95
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Cluster Memory >95% (5m)"
+  - alert: ClusterDiskLow
+    expr: 100 * sum(node_filesystem_avail_bytes{fstype!=""}) / sum(node_filesystem_size_bytes{fstype!=""}) < 5
+    for: 15m
+    labels: { severity: critical }
+    annotations:
+      summary: "Cluster Disk free <5% (15m)"
+
+- name: k8s-node
+  rules:
+  - alert: NodeCPUHigh
+    expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 95
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Node {{ $labels.instance }} CPU >95% (5m)"
+  - alert: NodeMemLow
+    expr: 100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 5
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Node {{ $labels.instance }} memory free <5% (5m)"
+  - alert: NodeDiskLow
+    expr: 100 * node_filesystem_avail_bytes{fstype!=""} / node_filesystem_size_bytes{fstype!=""} < 5
+    for: 15m
+    labels: { severity: critical }
+    annotations:
+      summary: "Node {{ $labels.instance }} disk free <5% (15m)"
+
+- name: istio-app
+  rules:
+  - alert: AppLatencyP99High
+    expr: histogram_quantile(0.99, sum by (le, destination_workload, destination_workload_namespace) (rate(istio_request_duration_milliseconds_bucket{reporter="destination"}[5m]))) > 2000
+    for: 10m
+    labels: { severity: critical }
+    annotations:
+      summary: "p99 latency >2s (10m) for {{ $labels.destination_workload }}"
+  - alert: AppErrorRateHigh
+    expr: (
+      sum by (destination_workload, destination_workload_namespace) (rate(istio_requests_total{reporter="destination", response_code=~"5.."}[5m]))
+      /
+      sum by (destination_workload, destination_workload_namespace) (rate(istio_requests_total{reporter="destination"}[5m]))
+    ) > 0.05
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Error rate >5% (5m) for {{ $labels.destination_workload }}"
+  - alert: AppAvailabilityLow
+    expr: 100 * (
+      sum by (destination_workload, destination_workload_namespace) (rate(istio_requests_total{reporter="destination", response_code=~"2..|3.."}[5m]))
+      /
+      sum by (destination_workload, destination_workload_namespace) (rate(istio_requests_total{reporter="destination"}[5m]))
+    ) < 98
+    for: 10m
+    labels: { severity: critical }
+    annotations:
+      summary: "Availability <98% (10m) for {{ $labels.destination_workload }}"
+
+- name: k8s-pod
+  rules:
+  - alert: PodCPUCloseToLimit
+    expr: 100 * (
+      sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!="",image!=""}[5m]))
+      /
+      sum by (namespace, pod) (kube_pod_container_resource_limits{resource="cpu",unit="core"})
+    ) > 95
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} CPU >95% of limit (5m)"
+  - alert: PodMemoryCloseToLimit
+    expr: 100 * (
+      sum by (namespace, pod) (container_memory_working_set_bytes{container!="",image!=""})
+      /
+      sum by (namespace, pod) (kube_pod_container_resource_limits{resource="memory",unit="byte"})
+    ) > 95
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} memory >95% of limit (5m)"
+  - alert: PodCrashLooping
+    expr: rate(kube_pod_container_status_restarts_total[5m]) > 0
+    for: 10m
+    labels: { severity: warn }
+    annotations:
+      summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is restarting"
+  - alert: NodeMemoryPressure
+    expr: max by (node) (kube_node_status_condition{condition="MemoryPressure",status="true"}) == 1
+    for: 5m
+    labels: { severity: critical }
+    annotations:
+      summary: "Node {{ $labels.node }} under MemoryPressure"
+```
+
+---
+
+## Ghi chú triển khai nhanh
+
+* Thêm nhãn chuẩn hoá (ví dụ `cluster`, `env`, `team`) trong Prometheus **external_labels** để group/route alert tốt hơn.
+* Với Istio, nếu bạn tách theo **service** thay vì workload, thay `destination_workload` bằng `destination_service`.
+* Với cluster lớn, tạo **recording rules** cho:
+
+  * `cluster:cpu_utilization:5m`, `cluster:mem_utilization:5m`, `cluster:disk_free_percent:5m`
+  * `workload:istio_latency_ms:p99:5m`, `workload:istio_error_ratio:5m`, `workload:availability_percent:5m`
+* Tùy SLO/đặc thù hệ thống, bạn có thể siết/nới ngưỡng (ví dụ dịch vụ nội bộ chấp nhận p99 lớn hơn).
+
+Nếu bạn dùng namespace/service cụ thể, mình có thể xuất sẵn **recording rules** & **dashboard JSON** (Grafana) khớp chính xác với naming của bạn.
