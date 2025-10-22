@@ -1,0 +1,267 @@
+# Overrides configuration block
+overrides:
+
+  # Global ingestion limits configurations
+  defaults:
+
+    # Ingestion related overrides
+    ingestion:
+
+      # Specifies whether the ingestion rate limits should be applied by each instance
+      # of the distributor and ingester individually, or the limits are to be shared
+      # across all instances. See the "override strategies" section for an example.
+      [rate_strategy: <global|local> | default = local]
+
+      # Burst size (bytes) used in ingestion.
+      # Results in errors like
+      #   RATE_LIMITED: ingestion rate limit (20000000 bytes) exceeded while
+      #   adding 10 bytes
+      [burst_size_bytes: <int> | default = 20000000 (20MB) ]
+
+      # Per-user ingestion rate limit (bytes) used in ingestion.
+      # Results in errors like
+      #   RATE_LIMITED: ingestion rate limit (15000000 bytes) exceeded while
+      #   adding 10 bytes
+      [rate_limit_bytes: <int> | default = 15000000 (15MB) ]
+
+      # Maximum number of active traces per user, per ingester.
+      # A value of 0 disables the check.
+      # Results in errors like
+      #    LIVE_TRACES_EXCEEDED: max live traces per tenant exceeded:
+      #    per-user traces limit (local: 10000 global: 0 actual local: 1) exceeded
+      # This override limit is used by the ingester.
+      [max_traces_per_user: <int> | default = 10000]
+
+      # Maximum number of active traces per user, across the cluster.
+      # A value of 0 disables the check.
+      [max_global_traces_per_user: <int> | default = 0]
+
+      # Shuffle sharding shards used for this user. A value of 0 uses all ingesters in the ring.
+      # Should not be lower than RF.
+      [tenant_shard_size: <int> | default = 0]
+
+      # Maximum bytes any attribute can be for both keys and values.
+      [max_attribute_bytes: <int> | default = 0]
+
+      # Pad push requests with an artificial delay, if set push requests will be delayed to ensure
+      # an average latency of at least artificial_delay.
+      [artificial_delay: <duration> | default = 0ms]
+
+    # Read related overrides
+    read:
+      # Maximum size in bytes of a tag-values query. Tag-values query is used mainly
+      # to populate the autocomplete dropdown. This limit protects the system from
+      # tags with high cardinality or large values such as HTTP URLs or SQL queries.
+      # This override limit is used by the ingester and the querier.
+      # A value of 0 disables the limit.
+      [max_bytes_per_tag_values_query: <int> | default = 1000000 (1MB) ]
+
+      # Maximum number of blocks to be inspected for a tag values query. Tag-values
+      # query is used mainly to populate the autocomplete dropdown. This limit
+      # protects the system from long block lists in the ingesters.
+      # This override limit is used by the ingester and the querier.
+      # A value of 0 disables the limit.
+      [max_blocks_per_tag_values_query: <int> | default = 0 (disabled) ]
+
+      # Per-user max search duration. If this value is set to 0 (default), then max_duration
+      #  in the front-end configuration is used.
+      [max_search_duration: <duration> | default = 0s]
+
+      # Per-user max duration for metrics queries. If this value is set to 0 (default), then metrics max_duration
+      #  in the front-end configuration is used.
+      [max_metrics_duration: <duration> | default = 0s]
+
+    # Compaction related overrides
+    compaction:
+      # Per-user block retention. If this value is set to 0 (default),
+      # then block_retention in the compactor configuration is used.
+      [block_retention: <duration> | default = 0s]
+      # Per-user compaction window. If this value is set to 0 (default),
+      # then block_retention in the compactor configuration is used.
+      [compaction_window: <duration> | default = 0s]
+      # Allow compaction and retention to be deactivated on a per-tenant basis. Default value
+      # is false (compaction active). Useful to perform operations on the backend
+      # that require compaction to be disabled for a period of time.
+      [compaction_disabled: <bool> | default = false]
+
+    # Metrics-generator related overrides
+    metrics_generator:
+
+      # Per-user configuration of the metrics-generator ring size. If set, the tenant will use a
+      # ring with at most the given amount of instances. Shuffle sharding is used to spread out
+      # smaller rings across all instances. If the value 0 or a value larger than the total amount
+      # of instances is used, all instances will be included in the ring.
+      #
+      # Together with metrics_generator.max_active_series this can be used to control the total
+      # amount of active series. The total max active series for a specific tenant will be:
+      #   metrics_generator.ring_size * metrics_generator.max_active_series
+      [ring_size: <int>]
+
+      # Per-user configuration of the metrics-generator processors. The following processors are
+      # supported:
+      #  - service-graphs
+      #  - span-metrics
+      #  - local-blocks
+      [processors: <list of strings>]
+
+      # Maximum number of active series in the registry, per instance of the metrics-generator. A
+      # value of 0 disables this check.
+      # If the limit is reached, no new series will be added but existing series will still be
+      # updated. The amount of limited series can be observed with the metric
+      #   tempo_metrics_generator_registry_series_limited_total
+      [max_active_series: <int>]
+
+      # Per-user configuration of the collection interval. A value of 0 means the global default is
+      # used set in the metrics_generator config block.
+      [collection_interval: <duration>]
+
+      # Per-user flag of the registry collection operation. If set, the registry will not be
+      # collected and no samples will be exported from the metrics-generator. The metrics-generator
+      # will still ingest spans and update its internal counters, including the amount of active
+      # series. To disable metrics generation entirely, clear metrics_generator.processors for this
+      # tenant.
+      #
+      # This setting is useful if you wish to test how many active series a tenant will generate, without
+      # actually writing these metrics.
+      [disable_collection: <bool> | default = false]
+
+      # Per-user configuration of the trace-id label name. This value will be used as name for the label to store the
+      # trace ID of exemplars in generated metrics. If not set, the default value "trace_id" will be used.
+      [trace_id_label_name: <string> | default = "trace_id"]
+
+      # This option only allows spans with end time that occur within the configured duration to be
+      # considered in metrics generation.
+      # This is to filter out spans that are outdated.
+      [ingestion_time_range_slack: <duration>]
+
+      # Configures the histogram implementation to use for span metrics and
+      # service graphs processors.  If native histograms are desired, the
+      # receiver must be configured to ingest native histograms.
+      [generate_native_histograms: <classic|native|both> | default = classic]
+
+      # Distributor -> metrics-generator forwarder related overrides
+      forwarder:
+        # Spans are stored in a queue in the distributor before being sent to the metrics-generators.
+        # The length of the queue and the amount of workers pulling from the queue can be configured.
+        [queue_size: <int> | default = 100]
+        [workers: <int> | default = 2]
+
+      # Per processor configuration
+      processor:
+
+        # Configuration for the service-graphs processor
+        service_graphs:
+          [histogram_buckets: <list of float>]
+          [dimensions: <list of string>]
+          [peer_attributes: <list of string>]
+          [enable_client_server_prefix: <bool>]
+          [enable_messaging_system_latency_histogram: <bool>]
+
+        # Configuration for the span-metrics processor
+        span_metrics:
+          [histogram_buckets: <list of float>]
+          # Allowed keys for intrinsic dimensions are: service, span_name, span_kind, status_code, and status_message.
+          [dimensions: <list of string>]
+          [intrinsic_dimensions: <map string to bool>]
+          [filter_policies: [
+            [
+              include/exclude:
+                match_type: <string> # options: strict, regexp
+                attributes:
+                  - key: <string>
+                    value: <any>
+            ]
+          ]
+          [dimension_mappings: <list of map>]
+          # Enable target_info metrics
+          [enable_target_info: <bool>]
+          # Drop specific resource labels from traces_target_info
+          [target_info_excluded_dimensions: <list of string>]
+          # add instance label to all span metrics series when enable_target_info is true
+          [enable_instance_label: <bool> | default = true]
+
+        # Configuration for the local-blocks processor
+        local-blocks:
+          [max_live_traces: <int>]
+          [max_block_duration: <duration>]
+          [max_block_bytes: <int>]
+          [flush_check_period: <duration>]
+          [trace_idle_period: <duration>]
+          [complete_block_timeout: <duration>]
+          [concurrent_blocks: <duration>]
+          [filter_server_spans: <bool>]
+
+    # Generic forwarding configuration
+
+    # Per-user configuration of generic forwarder feature. Each forwarder in the list
+    # must refer by name to a forwarder defined in the distributor.forwarders configuration.
+    forwarders: <list of string>
+
+    # Global enforced overrides
+    global:
+      # Maximum size of a single trace in bytes. A value of 0 disables the size
+      # check.
+      # This limit is used in 3 places:
+      #  - During search, traces will be skipped when they exceed this threshold.
+      #  - During ingestion, traces that exceed this threshold will be refused.
+      #  - During compaction, traces that exceed this threshold will be partially dropped.
+      # During ingestion, exceeding the threshold results in errors like
+      #    TRACE_TOO_LARGE: max size of trace (5000000) exceeded while adding 387 bytes
+      [max_bytes_per_trace: <int> | default = 5000000 (5MB) ]
+
+    # Storage enforced overrides
+    storage:
+      # Configures attributes to be stored in dedicated columns within the parquet file, rather than in the
+      # generic attribute key-value list. This allows for more efficient searching of these attributes.
+      # Up to 10 span attributes and 10 resource attributes can be configured as dedicated columns.
+      # Requires vParquet3
+      parquet_dedicated_columns:
+        [
+          name: <string>, # name of the attribute
+          type: <string>, # type of the attribute. options: string
+          scope: <string> # scope of the attribute. options: resource, span
+        ]
+
+    # Cost attribution usage tracker configuration
+    cost_attribution:
+      # List of attributes to group ingested data by.  Map value is optional. Can be used to rename and
+      # combine attributes.
+      dimensions: <map string to string>
+
+
+  # Tenant-specific overrides settings configuration file. The empty string (default
+  # value) disables using an overrides file.
+  [per_tenant_override_config: <string> | default = ""]
+
+  # How frequent tenant-specific overrides are read from the configuration file.
+  [per_tenant_override_period: <duration> | default = 10s]
+
+  # User-configurable overrides configuration
+  user_configurable_overrides:
+
+    # Enable the user-configurable overrides module
+    [enabled: <bool> | default = false]
+
+    # How often to poll the backend for new user-configurable overrides
+    [poll_interval: <duration> | default = 60s]
+
+    client:
+      # The storage backend to use
+      # Should be one of "gcs", "s3", "azure" or "local"
+      [backend: <string>]
+
+      # Backend-specific configuration, support the same configuration options as the
+      # trace backend configuration
+      local:
+      gcs:
+      s3:
+      azure:
+
+      # Check whether the backend supports versioning at startup. If enabled Tempo will not start if
+      # the backend doesn't support versioning.
+      [confirm_versioning: <bool> | default = true]
+
+    api:
+      # When enabled, Tempo will refuse request that modify overrides that are already set in the
+      # runtime overrides. For more details, see user-configurable overrides docs.
+      [check_for_conflicting_runtime_overrides: <bool> | default = false]
