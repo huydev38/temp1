@@ -1,115 +1,45 @@
-- name: Switch netplan renderer to NetworkManager and set DNS via nmcli
+- name: Update netplan renderer and DNS (minimal)
   hosts: workers
   become: true
-  gather_facts: true
   serial: 1
+  gather_facts: false
 
   vars:
-    # DNS bạn muốn cấu hình
-    dns_servers:
-      - "1.1.1.1"
-      - "8.8.8.8"
-    dns_search: []        # ví dụ: ["corp.local"]
-    ignore_auto_dns: true # ép bỏ DNS từ DHCP
-
-    # Netplan file override renderer (không sửa IP config hiện có)
-    netplan_nm_renderer_file: /etc/netplan/01-ansible-renderer-nm.yaml
+    netplan_file: /etc/netplan/99-netcfg-vmware.yaml
+    dns1: 192.168.100.52
+    dns2: 192.168.100.51
 
   tasks:
-    - name: Ensure NetworkManager is installed
-      ansible.builtin.apt:
-        name: network-manager
-        state: present
-        update_cache: true
+    - name: Set renderer to NetworkManager
+      ansible.builtin.replace:
+        path: "{{ netplan_file }}"
+        regexp: '(^\s*renderer:\s*)networkd\s*$'
+        replace: '\1NetworkManager'
+        backup: true
 
-    - name: Create netplan file to force renderer NetworkManager
-      ansible.builtin.copy:
-        dest: "{{ netplan_nm_renderer_file }}"
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          network:
-            version: 2
-            renderer: NetworkManager
-      notify: Apply netplan
+    # thay block nameservers.addresses: - old1 - old2  (đúng kiểu file bạn đang có)
+    - name: Replace nameservers addresses block (2 DNS)
+      ansible.builtin.replace:
+        path: "{{ netplan_file }}"
+        regexp: |
+          (?ms)^(\s*nameservers:\s*\n\s*addresses:\s*\n)(\s*-\s*\d{1,3}(?:\.\d{1,3}){3}\s*\n)(\s*-\s*\d{1,3}(?:\.\d{1,3}){3}\s*\n)
+        replace: |
+          \1  - {{ dns1 }}
+            - {{ dns2 }}
+        backup: true
 
-    # systemd-networkd thường đang chạy khi renderer=networkd
-    - name: Disable systemd-networkd (best effort)
-      ansible.builtin.systemd:
-        name: systemd-networkd
-        enabled: false
-        state: stopped
-      ignore_errors: true
-
-    - name: Enable and start NetworkManager
-      ansible.builtin.systemd:
-        name: NetworkManager
-        enabled: true
-        state: started
-
-    # Xác định interface đang dùng default route (thường là NIC chính)
-    - name: Determine primary interface
-      ansible.builtin.set_fact:
-        primary_iface: "{{ ansible_facts.default_ipv4.interface | default('') }}"
-
-    - name: Fail if primary interface can't be determined
-      ansible.builtin.fail:
-        msg: "Cannot determine default interface (ansible_facts.default_ipv4.interface is empty)."
-      when: primary_iface | length == 0
-
-    # Lấy connection name đang active ứng với NIC đó
-    - name: Get active NM connection name for primary interface
-      ansible.builtin.shell: |
-        set -o pipefail
-        nmcli -t -f NAME,DEVICE con show --active | awk -F: '$2=="{{ primary_iface }}"{print $1; exit}'
-      args:
-        executable: /bin/bash
-      register: nm_conn
-      changed_when: false
-
-    - name: Fail if no active NM connection found for interface
-      ansible.builtin.fail:
-        msg: "No active NetworkManager connection found for interface {{ primary_iface }}."
-      when: nm_conn.stdout | trim == ""
-
-    - name: Configure DNS servers on the connection (ipv4.dns)
-      ansible.builtin.command: >
-        nmcli con mod "{{ nm_conn.stdout | trim }}"
-        ipv4.dns "{{ dns_servers | join(' ') }}"
-      changed_when: true
-
-    - name: Configure DNS search domains (optional)
-      ansible.builtin.command: >
-        nmcli con mod "{{ nm_conn.stdout | trim }}"
-        ipv4.dns-search "{{ (dns_search | length > 0) | ternary(dns_search | join(' '), '') }}"
-      changed_when: dns_search | length > 0
-
-    - name: Ignore auto DNS from DHCP (optional but recommended)
-      ansible.builtin.command: >
-        nmcli con mod "{{ nm_conn.stdout | trim }}"
-        ipv4.ignore-auto-dns {{ ignore_auto_dns | ternary('yes','no') }}
-      changed_when: true
-
-    - name: Bring the connection up (apply NM changes)
-      ansible.builtin.command: >
-        nmcli con up "{{ nm_conn.stdout | trim }}"
-      changed_when: true
-
-    - name: Show current DNS status (debug)
-      ansible.builtin.shell: |
-        set -o pipefail
-        echo "=== nmcli dev show {{ primary_iface }} ==="
-        nmcli -f IP4.DNS,IP4.DOMAIN dev show "{{ primary_iface }}" || true
-        echo "=== resolvectl status (if available) ==="
-        resolvectl status 2>/dev/null | sed -n '1,120p' || true
-        echo "=== /etc/resolv.conf ==="
-        ls -l /etc/resolv.conf
-        sed -n '1,50p' /etc/resolv.conf
-      args:
-        executable: /bin/bash
-      changed_when: false
-
-  handlers:
     - name: Apply netplan
       ansible.builtin.command: netplan apply
+
+    - name: Quick check
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "=== renderer result ==="
+        grep -n "renderer:" {{ netplan_file }}
+        echo "=== DNS in file ==="
+        awk '/nameservers:/,0' {{ netplan_file }} | sed -n '1,12p'
+        echo "=== nmcli device status ==="
+        nmcli -t -f DEVICE,STATE dev status || true
+      args:
+        executable: /bin/bash
+      changed_when: false
