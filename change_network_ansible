@@ -43,3 +43,58 @@
       args:
         executable: /bin/bash
       changed_when: false
+ 
+    - name: Ensure systemd-resolved is installed/enabled
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        enabled: true
+        state: started
+
+    - name: Set DNS= in /etc/systemd/resolved.conf
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/resolved.conf
+        regexp: '^\s*DNS='
+        line: "DNS={{ resolved_dns | join(' ') }}"
+        create: false
+        backup: true
+
+    - name: Set FallbackDNS= (optional)
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/resolved.conf
+        regexp: '^\s*FallbackDNS='
+        line: "FallbackDNS={{ resolved_fallback_dns | join(' ') }}"
+        create: false
+      when: resolved_fallback_dns | length > 0
+
+    - name: Set Domains= (optional)
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/resolved.conf
+        regexp: '^\s*Domains='
+        line: "Domains={{ resolved_domains | join(' ') }}"
+        create: false
+      when: resolved_domains | length > 0
+
+    - name: Restart systemd-resolved
+      ansible.builtin.systemd:
+        name: systemd-resolved
+        state: restarted
+
+    # dùng stub (127.0.0.53) -> resolved sẽ forward theo DNS= bạn set
+    - name: Relink /etc/resolv.conf to systemd-resolved stub
+      ansible.builtin.file:
+        path: /etc/resolv.conf
+        state: link
+        force: true
+        src: /run/systemd/resolve/stub-resolv.conf
+
+    - name: Verify DNS
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "=== resolvectl status ==="
+        resolvectl status | sed -n '1,160p'
+        echo "=== /etc/resolv.conf ==="
+        ls -l /etc/resolv.conf
+        cat /etc/resolv.conf
+      args:
+        executable: /bin/bash
+      changed_when: false
